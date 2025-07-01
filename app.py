@@ -14,7 +14,7 @@ def load_config(config_path='config.yaml'):
         return yaml.safe_load(f)
 
 config = load_config()
-patterns_config = config['patterns'] # patterns adını patterns_config olarak değiştirdim çakışmaması için
+patterns_config = config['patterns']
 colors = config['colors']
 log_formats = config['log_formats']
 
@@ -40,13 +40,9 @@ def detect_attacks(log_lines, log_format_regex, patterns_config):
         raw_line = line.strip()
         parsed_ip = parsed.get("ip", "Bilinmiyor")
 
-        # Yeni patterns_config yapısına göre döngü
         for attack_type, rules_list in patterns_config.items():
-            # rules_list artık doğrudan regex dizisi değil, her biri sözlük olan bir liste
             for rule in rules_list: 
-                # Hata burada oluşuyorsa, 'rule' bir sözlük değil, bir string demektir.
-                # config.yaml'nin doğru yüklendiğinden emin olun.
-                regex = rule['regex'] # Kural sözlüğünden regex'i al
+                regex = rule['regex']
                 
                 if re.search(regex, raw_line, re.IGNORECASE):
                     results.append({
@@ -56,14 +52,11 @@ def detect_attacks(log_lines, log_format_regex, patterns_config):
                         "ip": parsed_ip,
                         "method": parsed.get("method", "Bilinmiyor"),
                         "url": parsed.get("url", "Bilinmiyor"),
-                        "severity": rule.get('severity', 'Bilinmiyor'), # Yeni alan
-                        "description": rule.get('description', 'Açıklama yok.'), # Yeni alan
-                        "recommendation": rule.get('recommendation', 'Öneri yok.'), # Yeni alan
+                        "severity": rule.get('severity', 'Bilinmiyor'),
+                        "description": rule.get('description', 'Açıklama yok.'),
+                        "recommendation": rule.get('recommendation', 'Öneri yok.'),
                         "raw": raw_line
                     })
-                    # Bir saldırı türü için bir kural eşleştiğinde, diğer kuralları kontrol etmeyi bırak
-                    # Eğer aynı log satırında birden fazla farklı saldırı tipini yakalamak istiyorsanız,
-                    # bu 'break' ifadesini kaldırabilirsiniz. Ancak şu anki mantık, bir kez eşleştiğinde yeterli sayıyor.
                     break 
     return results
 
@@ -93,7 +86,7 @@ def main():
     )
     log_format_regex = log_formats[selected_format_name]['regex']
 
-    detections = detect_attacks(content, log_format_regex, patterns_config) # patterns_config'i fonksiyona geçir
+    detections = detect_attacks(content, log_format_regex, patterns_config)
     if not detections:
         st.success("Log dosyasında herhangi bir şüpheli aktivite bulunamadı.")
         return
@@ -104,54 +97,26 @@ def main():
     def parse_log_time(time_str, format_name):
         try:
             if format_name == 'nginx':
-                # Nginx formatı: [DD/Mon/YYYY:HH:MM:SS +0000]
-                # Regex'ten gelen "zaman" stringi "[01/Jul/2025:10:30:00 +0000]" ise,
-                # '01/Jul/2025:10:30:00 +0000' kısmını alıp parantezleri kaldırırız.
                 if time_str.startswith('[') and time_str.endswith(']'):
-                    time_str_cleaned = time_str[1:-1] # Köşeli parantezleri kaldır
+                    time_str_cleaned = time_str[1:-1]
                     return pd.to_datetime(time_str_cleaned, format='%d/%b/%Y:%H:%M:%S %z', errors='coerce')
-                return pd.to_datetime(time_str, errors='coerce') # Varsayılan olarak dene
+                return pd.to_datetime(time_str, errors='coerce')
             elif format_name == 'generic':
-                # Generic format: YYYY-MM-DD HH:MM:SS veya benzeri
-                # pandas to_datetime genellikle yaygın formatları otomatik tanır
                 return pd.to_datetime(time_str, errors='coerce')
             else:
-                return pd.to_datetime(time_str, errors='coerce') # Tanımsız formatlar için genel deneme
+                return pd.to_datetime(time_str, errors='coerce')
         except Exception:
-            return pd.NaT # Not a Time (Geçersiz zaman)
+            return pd.NaT
 
-    # DataFrame'deki 'zaman' sütununu datetime objelerine dönüştür
     df['datetime'] = df['zaman'].apply(lambda x: parse_log_time(x, selected_format_name))
     
-    # Geçersiz zaman değerlerini temizle veya kullanıcıya bildir
     initial_rows = len(df)
-    df = df.dropna(subset=['datetime']) # Geçersiz zaman damgalarını içeren satırları kaldır
+    df = df.dropna(subset=['datetime'])
     if len(df) < initial_rows:
         st.warning(f"{initial_rows - len(df)} adet log satırındaki zaman damgaları ayrıştırılamadı ve filtrelenmeyecek.")
 
-    # --- Tarih Aralığı Filtreleme ---
-    # Eğer dataframe boş değilse ve geçerli datetime değerleri varsa min/max tarihleri al
-    if not df.empty and pd.notna(df['datetime']).any():
-        min_date_available = df['datetime'].min().date()
-        max_date_available = df['datetime'].max().date()
-    else:
-        # Eğer loglarda hiç geçerli tarih yoksa veya df boşsa varsayılan değerler
-        min_date_available = datetime.date.today() - datetime.timedelta(days=30)
-        max_date_available = datetime.date.today()
-
-    date_range_selection = st.sidebar.date_input(
-        "Tarih Aralığı Seçin",
-        value=(min_date_available, max_date_available),
-        min_value=min_date_available,
-        max_value=max_date_available
-    )
-
-    if len(date_range_selection) == 2:
-        start_date = datetime.datetime.combine(date_range_selection[0], datetime.time.min)
-        end_date = datetime.datetime.combine(date_range_selection[1], datetime.time.max)
-        filtered_df = df[(df['datetime'] >= start_date) & (df['datetime'] <= end_date)].copy() # copy() ekledim
-    else:
-        filtered_df = df.copy() # Eğer tarih aralığı seçilmediyse tüm DataFrame'i kullan
+    # Tarih aralığı filtreleme kaldırıldı. Artık doğrudan df kullanılıyor.
+    filtered_df = df.copy()
 
     # Diğer Filtreler
     all_attack_types = sorted(filtered_df['saldiri_tipi'].unique())
@@ -234,7 +199,6 @@ def main():
 
     # Etkileşimli Tablo (Yeni alanlar eklendi)
     st.subheader("Saldırı Detayları")
-    # 'description' ve 'recommendation' sütunlarının varlığını kontrol edelim
     display_columns = ['satir_no', 'zaman', 'ip', 'saldiri_tipi', 'severity', 'method', 'raw']
     if 'description' in filtered_df.columns:
         display_columns.insert(display_columns.index('raw'), 'description')
@@ -250,7 +214,6 @@ def main():
         report.write(f"Toplam Satır: {len(content)}\n")
         report.write(f"Tespit Edilen Saldırı Sayısı: {len(filtered_df)}\n\n")
         
-        # Sadece görünür sütunları rapora dahil et
         for index, row in filtered_df.iterrows():
             report.write("-" * 50 + "\n")
             report.write(f"Satır {row['satir_no']} - {row['saldiri_tipi']}\n")
